@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Classroom DSA Hub</title>
+  <style>
+    body{font-family:Inter,system-ui,Arial;margin:0;background:#f7f8fb;color:#111}
+    header{background:#3b82f6;color:white;padding:14px 20px}
+    .container{max-width:1000px;margin:22px auto;padding:18px;background:white;border-radius:10px;box-shadow:0 6px 20px rgba(20,20,50,.06)}
+    .row{display:flex;gap:18px}
+    .col{flex:1}
+    button{cursor:pointer;padding:8px 12px;border-radius:8px;border:0}
+    input,select{width:100%;padding:8px;border-radius:6px;border:1px solid #ddd}
+    .small{font-size:13px;color:#555}
+    .card{padding:10px;border-radius:8px;border:1px solid #eee;margin-bottom:10px}
+    .flex{display:flex;align-items:center;gap:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Classroom DSA Hub</h2>
+  </header>
+
+  <div class="container">
+    <div id="auth-area" class="row">
+      <div class="col">
+        <p id="welcome">Please login to continue</p>
+      </div>
+      <div class="col" style="text-align:right">
+        <button id="googleLogin">Sign in with Google</button>
+        <button id="signOut" style="display:none">Sign out</button>
+      </div>
+    </div>
+
+    <section id="admin-panel" style="display:none">
+      <h3>Add Resource (Admin)</h3>
+      <div class="row">
+        <div class="col"><input id="resTitle" placeholder="Resource title" /></div>
+        <div class="col"><input id="resURL" placeholder="https://..." /></div>
+        <div style="width:160px"><button id="addRes">Add</button></div>
+      </div>
+    </section>
+
+    <section class="container">
+      <h3>Shared Resources</h3>
+      <div id="resourcesList"></div>
+    </section>
+
+    <section class="container row">
+      <div class="col">
+        <h3>Daily DSA Questions</h3>
+        <div id="dsaList"></div>
+        <hr />
+        <h4>Submit your solution</h4>
+        <select id="selectQ"></select>
+        <div class="row" style="margin-top:8px">
+          <input id="timeTaken" placeholder="Time taken (seconds)" />
+          <div style="width:120px"><button id="submitSol">Submit</button></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>Leaderboard (This Week)</h3>
+        <div id="leaderboard"></div>
+      </div>
+    </section>
+
+    <section class="container">
+      <h3>Your Analytics</h3>
+      <div id="analytics"></div>
+    </section>
+
+    <p class="small">Notes: Replace <code>firebaseConfig</code> with your project config. First signed-in user becomes admin.</p>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+   // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyAX-aASLGcF0bTFnWt-LstBdTqe11D7K3k",
+  authDomain: "classroom-dsa-hub.firebaseapp.com",
+  projectId: "classroom-dsa-hub",
+  storageBucket: "classroom-dsa-hub.firebasestorage.app",
+  messagingSenderId: "732515233444",
+  appId: "1:732515233444:web:4436cd9006a36ba1210031",
+  measurementId: "G-8DV2DDH89P"
+};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+    const db = getFirestore(app);
+
+    const googleLogin = document.getElementById('googleLogin');
+    const signOutBtn = document.getElementById('signOut');
+    const welcome = document.getElementById('welcome');
+    const adminPanel = document.getElementById('admin-panel');
+    const addResBtn = document.getElementById('addRes');
+    const resTitle = document.getElementById('resTitle');
+    const resURL = document.getElementById('resURL');
+    const resourcesList = document.getElementById('resourcesList');
+    const dsaList = document.getElementById('dsaList');
+    const selectQ = document.getElementById('selectQ');
+    const timeTaken = document.getElementById('timeTaken');
+    const submitSol = document.getElementById('submitSol');
+    const leaderboard = document.getElementById('leaderboard');
+    const analytics = document.getElementById('analytics');
+
+    let currentUser = null;
+    let adminUid = null;
+
+    function el(tag, txt, cls){ const e = document.createElement(tag); if(txt) e.textContent = txt; if(cls) e.className = cls; return e }
+
+    googleLogin.onclick = async () => {
+      try { await signInWithPopup(auth, provider); }
+      catch(err){ alert(err.message); }
+    };
+    signOutBtn.onclick = async () => { await signOut(auth); };
+
+    onAuthStateChanged(auth, async (user) => {
+      currentUser = user;
+      if(user){
+        welcome.textContent = `Hello, ${user.displayName} (${user.email})`;
+        googleLogin.style.display = 'none'; signOutBtn.style.display = 'inline-block';
+        const uref = doc(db,'users',user.uid);
+        await setDoc(uref, {name:user.displayName,email:user.email,joinedOn:serverTimestamp()}, {merge:true});
+        if(!adminUid){
+          const admRef = doc(db,'meta','admin');
+          const admSnap = await getDoc(admRef);
+          if(!admSnap.exists()){ await setDoc(admRef,{uid:user.uid}); }
+          adminUid = (await getDoc(admRef)).data().uid;
+        }
+        adminPanel.style.display = user.uid===adminUid ? 'block':'none';
+      } else {
+        welcome.textContent='Please login to continue';
+        googleLogin.style.display='inline-block'; signOutBtn.style.display='none'; adminPanel.style.display='none';
+      }
+    });
+
+    const resourcesCol = collection(db,'resources');
+    const qResources = query(resourcesCol, orderBy('date','desc'));
+    onSnapshot(qResources, snap=>{
+      resourcesList.innerHTML='';
+      snap.forEach(docu=>{
+        const d = docu.data();
+        const card = el('div','','card');
+        const title = el('div', d.title+' — ');
+        const a = document.createElement('a'); a.href=d.url; a.target='_blank'; a.textContent='open';
+        title.appendChild(a); card.appendChild(title);
+        const btns = el('div','','flex');
+        ['watched','pending','important'].forEach(s=>{
+          const b = el('button',s);
+          b.onclick = async ()=>{
+            if(!currentUser){ alert('Login first'); return }
+            await updateDoc(doc(db,'users',currentUser.uid), { [`watchedLinks.${docu.id}`]:s });
+          };
+          btns.appendChild(b);
+        });
+        card.appendChild(btns);
+        resourcesList.appendChild(card);
+      });
+    });
+
+    addResBtn.onclick = async ()=>{
+      if(!currentUser) return alert('login');
+      if(currentUser.uid!==adminUid) return alert('Only admin');
+      const t=resTitle.value.trim(), u=resURL.value.trim();
+      if(!t||!u) return alert('fill both');
+      await addDoc(resourcesCol,{title:t,url:u,addedBy:currentUser.uid,date:serverTimestamp()});
+      resTitle.value=''; resURL.value='';
+    };
+
+    const dsaCol = collection(db,'dsaQuestions');
+    const qDsa = query(dsaCol, orderBy('date','desc'));
+    onSnapshot(qDsa, snap=>{
+      dsaList.innerHTML=''; selectQ.innerHTML='';
+      snap.forEach(d=>{
+        const data=d.data();
+        const c=el('div','','card'); c.appendChild(el('div',`[${data.difficulty||'--'}] ${data.question}`));
+        if(data.link){const a=document.createElement('a'); a.href=data.link; a.target='_blank'; a.textContent='link'; c.appendChild(a);}
+        dsaList.appendChild(c);
+        const opt=document.createElement('option'); opt.value=d.id; opt.textContent=data.question.slice(0,60);
+        selectQ.appendChild(opt);
+      });
+    });
+
+    submitSol.onclick = async ()=>{
+      if(!currentUser) return alert('login');
+      const qid=selectQ.value, t=Number(timeTaken.value);
+      if(!qid||!t) return alert('choose question & time');
+      await updateDoc(doc(db,'users',currentUser.uid), { [`solvedQuestions.${qid}`]: {timeTaken:t,date:serverTimestamp()} });
+      timeTaken.value=''; alert('submitted');
+    };
+
+    async function computeLeaderboard(){
+      const usersSnap = await getDocs(collection(db,'users')); const rows=[];
+      usersSnap.forEach(u=>{
+        const d=u.data(), solved=d.solvedQuestions||{};
+        const solvedCount=Object.keys(solved).length;
+        const avgTime=solvedCount ? Math.round(Object.values(solved).reduce((s,v)=>s+(v.timeTaken||0),0)/solvedCount) : 0;
+        const score=Math.round(solvedCount*10 - avgTime/30);
+        rows.push({name:d.name||u.id, solvedCount, avgTime, score});
+      });
+      rows.sort((a,b)=>b.score-a.score); leaderboard.innerHTML='';
+      rows.forEach(r=>{
+        const c=el('div','','card');
+        c.appendChild(el('div',`${r.name} — score ${r.score}`));
+        c.appendChild(el('div',`Solved: ${r.solvedCount} | Avg time: ${r.avgTime}s`));
+        leaderboard.appendChild(c);
+      });
+    }
+
+    onSnapshot(collection(db,'users'), ()=>computeLeaderboard());
+
+    async function computeAnalytics(uid){
+      const snap=await getDoc(doc(db,'users',uid)); if(!snap.exists()) return;
+      const d=snap.data(), watchedLinks=d.watchedLinks||{}, solved=d.solvedQuestions||{};
+      analytics.innerHTML=''; analytics.appendChild(el('div',`Resources interacted: ${Object.keys(watchedLinks).length}`));
+      const counts={watched:0,pending:0,important:0}; Object.values(watchedLinks).forEach(v=>counts[v]=(counts[v]||0)+1);
+      analytics.appendChild(el('div',`Watched: ${counts.watched} | Pending: ${counts.pending} | Important: ${counts.important}`));
+      analytics.appendChild(el('div',`DSA solved: ${Object.keys(solved).length}`));
+    }
+
+    onAuthStateChanged(auth, user=>{
+      if(user){ onSnapshot(doc(db,'users',user.uid), ()=>computeAnalytics(user.uid)); }
+      else { analytics.innerHTML=''; }
+    });
+
+    // Admin-only helper function to add DSA questions from console
+    window.addDSA = async (question,difficulty='easy',link='')=>{
+      if(!currentUser || currentUser.uid!==adminUid) throw 'only admin';
+      await addDoc(dsaCol,{question,difficulty,link,date:serverTimestamp()});
+    };
+  </script>
+</body>
+</html>
